@@ -50,6 +50,7 @@ import androidx.compose.material.icons.outlined.Visibility
 import androidx.compose.material.icons.outlined.VisibilityOff
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
+import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
@@ -404,7 +405,7 @@ private fun ToolRow(
         }
         Text("SOON", fontSize = 9.sp, fontWeight = FontWeight.Bold, letterSpacing = .4.sp, color = Quiet)
     }
-    androidx.compose.foundation.layout.HorizontalDivider(color = Line, thickness = .7.dp)
+    HorizontalDivider(color = Line, thickness = .7.dp)
 }
 
 @Composable
