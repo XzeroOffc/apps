@@ -81,7 +81,6 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.media3.common.MediaItem
-import androidx.media3.common.MimeTypes
 import androidx.media3.common.PlaybackException
 import androidx.media3.common.Player
 import androidx.media3.datasource.DefaultDataSource
@@ -744,13 +743,16 @@ private fun PlayerScreen(
             override fun onPlayerError(error: PlaybackException) {
                 isBuffering = false
                 isPlaying = false
-                playbackError = "Audio gagal diputar (${error.errorCodeName}). Tekan Coba lagi."
+                playbackError = if (error.errorCode == PlaybackException.ERROR_CODE_PARSING_CONTAINER_UNSUPPORTED) {
+                    "Format audio dari layanan tidak dikenali. Coba lagi atau pilih hasil lagu lainnya."
+                } else {
+                    "Audio gagal diputar (${error.errorCodeName}). Tekan Coba lagi."
+                }
             }
         })
         player.setMediaItem(
             MediaItem.Builder()
                 .setUri(audioUrl)
-                .setMimeType(MimeTypes.AUDIO_MPEG)
                 .build()
         )
         player.prepare()
