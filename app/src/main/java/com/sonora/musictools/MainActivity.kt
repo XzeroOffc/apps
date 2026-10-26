@@ -1,8 +1,6 @@
 package com.sonora.musictools
 
 import android.os.Bundle
-import android.media.AudioAttributes
-import android.media.MediaPlayer
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.BackHandler
 import androidx.activity.compose.setContent
@@ -82,6 +80,14 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.media3.common.MediaItem
+import androidx.media3.common.MimeTypes
+import androidx.media3.common.PlaybackException
+import androidx.media3.common.Player
+import androidx.media3.datasource.DefaultDataSource
+import androidx.media3.datasource.DefaultHttpDataSource
+import androidx.media3.exoplayer.ExoPlayer
+import androidx.media3.exoplayer.source.DefaultMediaSourceFactory
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.launch
@@ -628,7 +634,7 @@ private fun SearchResultRow(index: Int, track: MusicTrack, onClick: () -> Unit) 
         Column(Modifier.weight(1f)) {
             Text(track.title, fontSize = 14.sp, fontWeight = FontWeight.Bold, maxLines = 1, overflow = TextOverflow.Ellipsis)
             Spacer(Modifier.height(3.dp))
-            Text(listOf(track.views, track.uploaded).filter { it.isNotBlank() }.joinToString("  ·  ").ifBlank { "YouTube" }, fontSize = 11.sp, color = Muted, maxLines = 1, overflow = TextOverflow.Ellipsis)
+            Text(listOf(track.artist, track.views, track.uploaded).filter { it.isNotBlank() }.joinToString("  ·  ").ifBlank { "YouTube" }, fontSize = 11.sp, color = Muted, maxLines = 1, overflow = TextOverflow.Ellipsis)
         }
         Spacer(Modifier.width(8.dp))
         Text(track.duration, fontSize = 11.sp, color = Quiet)
@@ -658,6 +664,7 @@ private fun PlayerScreen(
     onBack: () -> Unit,
     onNavigate: (AppRoute) -> Unit
 ) {
+    val context = LocalContext.current
     var lyrics by remember(track?.videoId) { mutableStateOf<TrackLyrics?>(null) }
     var media by remember(track?.videoId) { mutableStateOf<PlayableMedia?>(null) }
     var lyricsLoading by remember(track?.videoId) { mutableStateOf(track != null) }
@@ -665,12 +672,12 @@ private fun PlayerScreen(
     var lyricsError by remember(track?.videoId) { mutableStateOf("") }
     var mediaError by remember(track?.videoId) { mutableStateOf("") }
     var retryCount by remember(track?.videoId) { mutableStateOf(0) }
-    var mediaPlayer by remember(track?.videoId) { mutableStateOf<MediaPlayer?>(null) }
+    var mediaPlayer by remember(track?.videoId) { mutableStateOf<ExoPlayer?>(null) }
     var isPlaying by remember(track?.videoId) { mutableStateOf(false) }
     var isBuffering by remember(track?.videoId) { mutableStateOf(false) }
     var playbackError by remember(track?.videoId) { mutableStateOf("") }
-    var playbackPosition by remember(track?.videoId) { mutableStateOf(0) }
-    var playbackDuration by remember(track?.videoId) { mutableStateOf(0) }
+    var playbackPosition by remember(track?.videoId) { mutableStateOf(0L) }
+    var playbackDuration by remember(track?.videoId) { mutableStateOf(0L) }
 
     LaunchedEffect(track?.videoId, apiKey, retryCount) {
         val selected = track ?: return@LaunchedEffect
@@ -707,40 +714,47 @@ private fun PlayerScreen(
     DisposableEffect(media?.url) {
         val audioUrl = media?.url
         if (audioUrl.isNullOrBlank()) return@DisposableEffect onDispose { }
-        val player = MediaPlayer()
+        val httpFactory = DefaultHttpDataSource.Factory()
+            .setUserAgent("Mozilla/5.0 (Linux; Android) SONORA Music Tools")
+            .setAllowCrossProtocolRedirects(true)
+            .setConnectTimeoutMs(20_000)
+            .setReadTimeoutMs(30_000)
+        val dataSourceFactory = DefaultDataSource.Factory(context, httpFactory)
+        val player = ExoPlayer.Builder(context)
+            .setMediaSourceFactory(DefaultMediaSourceFactory(dataSourceFactory))
+            .build()
         mediaPlayer = player
         isBuffering = true
         playbackError = ""
-        player.setAudioAttributes(
-            AudioAttributes.Builder()
-                .setUsage(AudioAttributes.USAGE_MEDIA)
-                .setContentType(AudioAttributes.CONTENT_TYPE_MUSIC)
+        player.addListener(object : Player.Listener {
+            override fun onPlaybackStateChanged(playbackState: Int) {
+                isBuffering = playbackState == Player.STATE_BUFFERING
+                if (playbackState == Player.STATE_READY) {
+                    playbackDuration = player.duration.coerceAtLeast(0L)
+                } else if (playbackState == Player.STATE_ENDED) {
+                    playbackPosition = 0L
+                    isPlaying = false
+                }
+            }
+
+            override fun onIsPlayingChanged(playing: Boolean) {
+                isPlaying = playing
+            }
+
+            override fun onPlayerError(error: PlaybackException) {
+                isBuffering = false
+                isPlaying = false
+                playbackError = "Audio gagal diputar (${error.errorCodeName}). Tekan Coba lagi."
+            }
+        })
+        player.setMediaItem(
+            MediaItem.Builder()
+                .setUri(audioUrl)
+                .setMimeType(MimeTypes.AUDIO_MPEG)
                 .build()
         )
-        player.setOnPreparedListener {
-            playbackDuration = it.duration.coerceAtLeast(0)
-            isBuffering = false
-            runCatching { it.start(); isPlaying = true }
-                .onFailure { playbackError = "Audio tidak dapat diputar di perangkat ini." }
-        }
-        player.setOnCompletionListener {
-            isPlaying = false
-            playbackPosition = 0
-            runCatching { it.seekTo(0) }
-        }
-        player.setOnErrorListener { _, _, _ ->
-            isBuffering = false
-            isPlaying = false
-            playbackError = "Pemutaran audio terputus. Coba muat ulang lagu."
-            true
-        }
-        runCatching {
-            player.setDataSource(audioUrl)
-            player.prepareAsync()
-        }.onFailure {
-            isBuffering = false
-            playbackError = "Tautan audio tidak dapat dibuka. Coba muat ulang lagu."
-        }
+        player.prepare()
+        player.playWhenReady = true
         onDispose {
             if (mediaPlayer === player) mediaPlayer = null
             runCatching { player.release() }
@@ -752,8 +766,8 @@ private fun PlayerScreen(
     LaunchedEffect(mediaPlayer) {
         while (mediaPlayer != null) {
             val player = mediaPlayer
-            if (player != null && runCatching { player.isPlaying }.getOrDefault(false)) {
-                playbackPosition = runCatching { player.currentPosition }.getOrDefault(playbackPosition)
+            if (player != null && player.isPlaying) {
+                playbackPosition = player.currentPosition.coerceAtLeast(0L)
             }
             delay(500)
         }
@@ -791,7 +805,7 @@ private fun PlayerScreen(
                         Column(Modifier.weight(1f)) {
                             Text(track.title, fontSize = 19.sp, fontWeight = FontWeight.ExtraBold, lineHeight = 23.sp)
                             Spacer(Modifier.height(4.dp))
-                            Text(media?.title ?: track.videoUrl, fontSize = 13.sp, color = Muted, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                            Text(track.artist.ifBlank { "YouTube" }, fontSize = 13.sp, color = Muted, maxLines = 1, overflow = TextOverflow.Ellipsis)
                             Spacer(Modifier.height(3.dp))
                             Text("${track.views}  ·  ${media?.duration ?: track.duration}", fontSize = 11.sp, color = Quiet, maxLines = 1, overflow = TextOverflow.Ellipsis)
                         }
@@ -813,12 +827,12 @@ private fun PlayerScreen(
                     }
                     mediaPlayer != null -> {
                         Slider(
-                            value = playbackPosition.toFloat().coerceIn(0f, playbackDuration.coerceAtLeast(1).toFloat()),
+                            value = playbackPosition.toFloat().coerceIn(0f, playbackDuration.coerceAtLeast(1L).toFloat()),
                             onValueChange = { position ->
-                                playbackPosition = position.toInt()
-                                runCatching { mediaPlayer?.seekTo(position.toInt()) }
+                                playbackPosition = position.toLong()
+                                mediaPlayer?.seekTo(position.toLong())
                             },
-                            valueRange = 0f..playbackDuration.coerceAtLeast(1).toFloat()
+                            valueRange = 0f..playbackDuration.coerceAtLeast(1L).toFloat()
                         )
                         Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
                             Text(formatPlaybackTime(playbackPosition), fontSize = 11.sp, color = Quiet)
@@ -829,8 +843,7 @@ private fun PlayerScreen(
                             IconButton(
                                 onClick = {
                                     runCatching {
-                                        if (isPlaying) mediaPlayer?.pause() else mediaPlayer?.start()
-                                        isPlaying = mediaPlayer?.isPlaying == true
+                                        if (isPlaying) mediaPlayer?.pause() else mediaPlayer?.play()
                                     }.onFailure { playbackError = "Pemutaran audio gagal." }
                                 },
                                 enabled = !isBuffering,
@@ -882,8 +895,8 @@ private fun PlayerScreen(
     }
 }
 
-private fun formatPlaybackTime(milliseconds: Int): String {
-    val totalSeconds = (milliseconds.coerceAtLeast(0) / 1000)
+private fun formatPlaybackTime(milliseconds: Long): String {
+    val totalSeconds = (milliseconds.coerceAtLeast(0L) / 1000L)
     return "%d:%02d".format(totalSeconds / 60, totalSeconds % 60)
 }
 

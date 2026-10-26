@@ -10,6 +10,7 @@ import java.net.URL
 
 data class MusicTrack(
     val title: String,
+    val artist: String,
     val videoId: String,
     val videoUrl: String,
     val thumbnail: String,
@@ -43,11 +44,14 @@ object MusicApi {
         buildList {
             for (index in 0 until results.length()) {
                 val item = results.optJSONObject(index) ?: continue
-                val title = item.optString("title").trim()
-                if (title.isBlank()) continue
+                val rawTitle = item.optString("title").trim()
+                if (rawTitle.isBlank()) continue
+                val cleanedTitle = cleanYouTubeTitle(rawTitle)
+                val titleParts = cleanedTitle.split(" - ", limit = 2)
                 add(
                     MusicTrack(
-                        title = title,
+                        title = titleParts.last().trim().ifBlank { cleanedTitle },
+                        artist = if (titleParts.size > 1) titleParts.first().trim() else "",
                         videoId = item.optString("videoId"),
                         videoUrl = item.optString("url"),
                         thumbnail = item.optString("thumbnail"),
@@ -61,32 +65,34 @@ object MusicApi {
     }
 
     suspend fun findLyrics(track: MusicTrack, apiKey: String): TrackLyrics? = withContext(Dispatchers.IO) {
-        val query = track.title
-        val response = getJson("$BASE_URL/lyrics?q=${Uri.encode(query)}", apiKey)
-        val results = response.optJSONArray("result") ?: return@withContext null
         var first: TrackLyrics? = null
-        for (index in 0 until results.length()) {
-            val item = results.optJSONObject(index) ?: continue
-            val candidate = TrackLyrics(
-                name = item.optString("trackName").ifBlank { item.optString("name", track.title) },
-                artist = item.optString("artistName"),
-                album = item.optString("albumName"),
-                plainLyrics = item.optString("plainLyrics"),
-                syncedLyrics = item.optString("syncedLyrics"),
-                instrumental = item.optBoolean("instrumental", false)
-            )
-            if (first == null) first = candidate
-            val candidateTitle = normalize(candidate.name)
-            val selectedTitle = normalize(track.title)
-            if (candidateTitle == selectedTitle || selectedTitle.contains(candidateTitle) || candidateTitle.contains(selectedTitle)) {
-                return@withContext candidate
+        val queries = listOf("${track.artist} ${track.title}".trim(), track.title).distinct()
+        for (query in queries) {
+            val response = getJson("$BASE_URL/lyrics?q=${Uri.encode(query)}", apiKey)
+            val results = response.optJSONArray("result") ?: continue
+            for (index in 0 until results.length()) {
+                val item = results.optJSONObject(index) ?: continue
+                val candidate = TrackLyrics(
+                    name = item.optString("trackName").ifBlank { item.optString("name", track.title) },
+                    artist = item.optString("artistName", track.artist),
+                    album = item.optString("albumName"),
+                    plainLyrics = item.optString("plainLyrics"),
+                    syncedLyrics = item.optString("syncedLyrics"),
+                    instrumental = item.optBoolean("instrumental", false)
+                )
+                if (first == null) first = candidate
+                val candidateTitle = normalize(candidate.name)
+                val selectedTitle = normalize(track.title)
+                if (candidateTitle == selectedTitle || selectedTitle.contains(candidateTitle) || candidateTitle.contains(selectedTitle)) {
+                    return@withContext candidate
+                }
             }
         }
         first
     }
 
     suspend fun getPlayableMedia(track: MusicTrack, apiKey: String): PlayableMedia = withContext(Dispatchers.IO) {
-        val query = track.title
+        val query = listOf(track.artist, track.title).filter { it.isNotBlank() }.joinToString(" ")
         val response = getJson("$BASE_URL/play?q=${Uri.encode(query)}", apiKey)
         val media = response.optJSONObject("media")
             ?: throw IOException("Layanan tidak mengembalikan data audio.")
@@ -130,4 +136,9 @@ object MusicApi {
     private fun normalize(value: String): String = value
         .lowercase()
         .filter { it.isLetterOrDigit() }
+
+    private fun cleanYouTubeTitle(value: String): String = value
+        .replace(Regex("\\s*[\\[(].*?(official|lyric|lyrics|lirik|video|audio|visualizer).*?[\\])]+\\s*", RegexOption.IGNORE_CASE), "")
+        .replace(Regex("\\s*[-|]\\s*(official\\s+)?(music\\s+)?(lyric|lyrics|lirik|audio)?\\s*video.*$", RegexOption.IGNORE_CASE), "")
+        .trim()
 }
