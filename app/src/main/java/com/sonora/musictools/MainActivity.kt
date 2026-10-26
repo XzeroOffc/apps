@@ -626,9 +626,9 @@ private fun SearchResultRow(index: Int, track: MusicTrack, onClick: () -> Unit) 
         }
         Spacer(Modifier.width(11.dp))
         Column(Modifier.weight(1f)) {
-            Text(track.name, fontSize = 14.sp, fontWeight = FontWeight.Bold, maxLines = 1, overflow = TextOverflow.Ellipsis)
+            Text(track.title, fontSize = 14.sp, fontWeight = FontWeight.Bold, maxLines = 1, overflow = TextOverflow.Ellipsis)
             Spacer(Modifier.height(3.dp))
-            Text("${track.artist}  ·  ${track.album}", fontSize = 11.sp, color = Muted, maxLines = 1, overflow = TextOverflow.Ellipsis)
+            Text(listOf(track.views, track.uploaded).filter { it.isNotBlank() }.joinToString("  ·  ").ifBlank { "YouTube" }, fontSize = 11.sp, color = Muted, maxLines = 1, overflow = TextOverflow.Ellipsis)
         }
         Spacer(Modifier.width(8.dp))
         Text(track.duration, fontSize = 11.sp, color = Quiet)
@@ -658,21 +658,21 @@ private fun PlayerScreen(
     onBack: () -> Unit,
     onNavigate: (AppRoute) -> Unit
 ) {
-    var lyrics by remember(track?.spotifyUrl) { mutableStateOf<TrackLyrics?>(null) }
-    var media by remember(track?.spotifyUrl) { mutableStateOf<PlayableMedia?>(null) }
-    var lyricsLoading by remember(track?.spotifyUrl) { mutableStateOf(track != null) }
-    var mediaLoading by remember(track?.spotifyUrl) { mutableStateOf(track != null) }
-    var lyricsError by remember(track?.spotifyUrl) { mutableStateOf("") }
-    var mediaError by remember(track?.spotifyUrl) { mutableStateOf("") }
-    var retryCount by remember(track?.spotifyUrl) { mutableStateOf(0) }
-    var mediaPlayer by remember(track?.spotifyUrl) { mutableStateOf<MediaPlayer?>(null) }
-    var isPlaying by remember(track?.spotifyUrl) { mutableStateOf(false) }
-    var isBuffering by remember(track?.spotifyUrl) { mutableStateOf(false) }
-    var playbackError by remember(track?.spotifyUrl) { mutableStateOf("") }
-    var playbackPosition by remember(track?.spotifyUrl) { mutableStateOf(0) }
-    var playbackDuration by remember(track?.spotifyUrl) { mutableStateOf(0) }
+    var lyrics by remember(track?.videoId) { mutableStateOf<TrackLyrics?>(null) }
+    var media by remember(track?.videoId) { mutableStateOf<PlayableMedia?>(null) }
+    var lyricsLoading by remember(track?.videoId) { mutableStateOf(track != null) }
+    var mediaLoading by remember(track?.videoId) { mutableStateOf(track != null) }
+    var lyricsError by remember(track?.videoId) { mutableStateOf("") }
+    var mediaError by remember(track?.videoId) { mutableStateOf("") }
+    var retryCount by remember(track?.videoId) { mutableStateOf(0) }
+    var mediaPlayer by remember(track?.videoId) { mutableStateOf<MediaPlayer?>(null) }
+    var isPlaying by remember(track?.videoId) { mutableStateOf(false) }
+    var isBuffering by remember(track?.videoId) { mutableStateOf(false) }
+    var playbackError by remember(track?.videoId) { mutableStateOf("") }
+    var playbackPosition by remember(track?.videoId) { mutableStateOf(0) }
+    var playbackDuration by remember(track?.videoId) { mutableStateOf(0) }
 
-    LaunchedEffect(track?.spotifyUrl, apiKey, retryCount) {
+    LaunchedEffect(track?.videoId, apiKey, retryCount) {
         val selected = track ?: return@LaunchedEffect
         lyrics = null
         media = null
@@ -789,11 +789,11 @@ private fun PlayerScreen(
                         RecordMark(Modifier.size(72.dp), 72.dp)
                         Spacer(Modifier.width(15.dp))
                         Column(Modifier.weight(1f)) {
-                            Text(track.name, fontSize = 19.sp, fontWeight = FontWeight.ExtraBold, lineHeight = 23.sp)
+                            Text(track.title, fontSize = 19.sp, fontWeight = FontWeight.ExtraBold, lineHeight = 23.sp)
                             Spacer(Modifier.height(4.dp))
-                            Text(track.artist, fontSize = 13.sp, color = Muted)
+                            Text(media?.title ?: track.videoUrl, fontSize = 13.sp, color = Muted, maxLines = 1, overflow = TextOverflow.Ellipsis)
                             Spacer(Modifier.height(3.dp))
-                            Text("${track.album}  ·  ${media?.duration ?: track.duration}", fontSize = 11.sp, color = Quiet, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                            Text("${track.views}  ·  ${media?.duration ?: track.duration}", fontSize = 11.sp, color = Quiet, maxLines = 1, overflow = TextOverflow.Ellipsis)
                         }
                     }
                 }

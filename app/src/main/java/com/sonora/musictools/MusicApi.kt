@@ -9,11 +9,13 @@ import java.net.HttpURLConnection
 import java.net.URL
 
 data class MusicTrack(
-    val name: String,
-    val artist: String,
-    val album: String,
+    val title: String,
+    val videoId: String,
+    val videoUrl: String,
+    val thumbnail: String,
     val duration: String,
-    val spotifyUrl: String
+    val uploaded: String,
+    val views: String
 )
 
 data class TrackLyrics(
@@ -36,20 +38,22 @@ object MusicApi {
     private const val BASE_URL = "https://sylvatica.my.id/api/search"
 
     suspend fun searchTracks(query: String, apiKey: String): List<MusicTrack> = withContext(Dispatchers.IO) {
-        val response = getJson("$BASE_URL/spotify?q=${Uri.encode(query)}", apiKey)
+        val response = getJson("$BASE_URL/yts?q=${Uri.encode(query)}", apiKey)
         val results = response.optJSONArray("result") ?: return@withContext emptyList()
         buildList {
             for (index in 0 until results.length()) {
                 val item = results.optJSONObject(index) ?: continue
-                val name = item.optString("name").trim()
-                if (name.isBlank()) continue
+                val title = item.optString("title").trim()
+                if (title.isBlank()) continue
                 add(
                     MusicTrack(
-                        name = name,
-                        artist = item.optString("artist", "Artis tidak diketahui"),
-                        album = item.optString("album", "Album tidak diketahui"),
+                        title = title,
+                        videoId = item.optString("videoId"),
+                        videoUrl = item.optString("url"),
+                        thumbnail = item.optString("thumbnail"),
                         duration = item.optString("duration"),
-                        spotifyUrl = item.optString("spotifyUrl")
+                        uploaded = item.optString("uploaded"),
+                        views = item.optString("views")
                     )
                 )
             }
@@ -57,28 +61,32 @@ object MusicApi {
     }
 
     suspend fun findLyrics(track: MusicTrack, apiKey: String): TrackLyrics? = withContext(Dispatchers.IO) {
-        val query = "${track.name} ${track.artist}"
+        val query = track.title
         val response = getJson("$BASE_URL/lyrics?q=${Uri.encode(query)}", apiKey)
         val results = response.optJSONArray("result") ?: return@withContext null
         var first: TrackLyrics? = null
         for (index in 0 until results.length()) {
             val item = results.optJSONObject(index) ?: continue
             val candidate = TrackLyrics(
-                name = item.optString("trackName").ifBlank { item.optString("name", track.name) },
-                artist = item.optString("artistName", track.artist),
-                album = item.optString("albumName", track.album),
+                name = item.optString("trackName").ifBlank { item.optString("name", track.title) },
+                artist = item.optString("artistName"),
+                album = item.optString("albumName"),
                 plainLyrics = item.optString("plainLyrics"),
                 syncedLyrics = item.optString("syncedLyrics"),
                 instrumental = item.optBoolean("instrumental", false)
             )
             if (first == null) first = candidate
-            if (normalize(candidate.name) == normalize(track.name)) return@withContext candidate
+            val candidateTitle = normalize(candidate.name)
+            val selectedTitle = normalize(track.title)
+            if (candidateTitle == selectedTitle || selectedTitle.contains(candidateTitle) || candidateTitle.contains(selectedTitle)) {
+                return@withContext candidate
+            }
         }
         first
     }
 
     suspend fun getPlayableMedia(track: MusicTrack, apiKey: String): PlayableMedia = withContext(Dispatchers.IO) {
-        val query = "${track.name} ${track.artist}"
+        val query = track.title
         val response = getJson("$BASE_URL/play?q=${Uri.encode(query)}", apiKey)
         val media = response.optJSONObject("media")
             ?: throw IOException("Layanan tidak mengembalikan data audio.")
@@ -89,9 +97,9 @@ object MusicApi {
         val videoInfo = response.optJSONObject("video_info")
         PlayableMedia(
             url = audioUrl,
-            title = media.optString("title").ifBlank { track.name },
+            title = media.optString("title").ifBlank { track.title },
             duration = videoInfo?.optString("duration").orEmpty().ifBlank { track.duration },
-            thumbnail = videoInfo?.optString("thumbnail").orEmpty()
+            thumbnail = videoInfo?.optString("thumbnail").orEmpty().ifBlank { track.thumbnail }
         )
     }
 

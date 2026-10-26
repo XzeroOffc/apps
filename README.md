@@ -25,7 +25,7 @@ Workflow membangun APK debug. Runner GitHub hanya membangun file APK, bukan meng
 3. Cari lagu berdasarkan judul atau artis, lalu pilih hasil untuk membuka halaman pemutar dan lirik.
 4. SONORA mencari URL audio lewat endpoint `/api/search/play` dan memutarnya langsung di aplikasi. Tombol putar/jeda dan penggeser posisi tersedia di halaman pemutar.
 
-Pencarian memakai endpoint `/api/search/spotify`, lirik memakai `/api/search/lyrics`, dan audio memakai `/api/search/play`. Semua permintaan memakai API key melalui header `X-API-Key`.
+Pencarian memakai endpoint `/api/search/yts`, lirik memakai `/api/search/lyrics`, dan audio memakai `/api/search/play`. Hasil pencarian YouTube menampilkan judul, durasi, tayangan, dan waktu unggah. Semua permintaan memakai API key melalui header `X-API-Key`.
 
 ## Build lokal
 
