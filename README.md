@@ -1,6 +1,6 @@
 # SONORA Music Tools for Android
 
-Aplikasi Android native dengan splash loading, login pemilik, dashboard, navigasi antarroute, dan halaman Cari Lagu, Pemutar Musik, Koleksi, serta Playlist yang sementara bertanda **Coming Soon**.
+Aplikasi Android native dengan splash loading, login pemilik, dashboard, pencarian lagu, pemutar audio di dalam aplikasi, lirik, dan navigasi koleksi serta playlist.
 
 ## Akun demo
 
@@ -18,6 +18,15 @@ Kredensial demo berada di `app/src/main/java/com/sonora/musictools/OwnerCredenti
 
 Workflow membangun APK debug. Runner GitHub hanya membangun file APK, bukan meng-host aplikasi untuk dibuka terus-menerus.
 
+## Search, pemutar audio, dan lirik
+
+1. Buka menu **Cari** dan masukkan API key Sylvatica saat diminta.
+2. Key disimpan terenkripsi menggunakan Android Keystore dan tidak ditanam di source code.
+3. Cari lagu berdasarkan judul atau artis, lalu pilih hasil untuk membuka halaman pemutar dan lirik.
+4. SONORA mencari URL audio lewat endpoint `/api/search/play` dan memutarnya langsung di aplikasi. Tombol putar/jeda dan penggeser posisi tersedia di halaman pemutar.
+
+Pencarian memakai endpoint `/api/search/spotify`, lirik memakai `/api/search/lyrics`, dan audio memakai `/api/search/play`. Semua permintaan memakai API key melalui header `X-API-Key`.
+
 ## Build lokal
 
 Gunakan JDK 17, Android SDK API 36, dan Gradle 8.13. Dari folder project:
@@ -30,4 +39,4 @@ APK akan dibuat di `app/build/outputs/apk/debug/app-debug.apk`.
 
 ## Catatan
 
-Source ini menyiapkan UI dan navigasi. Pencarian lagu, pemutaran audio, koleksi, dan playlist belum terhubung ke layanan musik.
+Search, pemutar audio, dan lirik terhubung ke endpoint Sylvatica. Koleksi dan playlist masih berupa halaman Coming Soon.

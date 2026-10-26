@@ -1,6 +1,8 @@
 package com.sonora.musictools
 
 import android.os.Bundle
+import android.media.AudioAttributes
+import android.media.MediaPlayer
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.BackHandler
 import androidx.activity.compose.setContent
@@ -44,6 +46,7 @@ import androidx.compose.material.icons.outlined.Home
 import androidx.compose.material.icons.outlined.LibraryMusic
 import androidx.compose.material.icons.outlined.Lock
 import androidx.compose.material.icons.outlined.MusicNote
+import androidx.compose.material.icons.outlined.Pause
 import androidx.compose.material.icons.outlined.PlayArrow
 import androidx.compose.material.icons.outlined.Search
 import androidx.compose.material.icons.outlined.Visibility
@@ -51,20 +54,25 @@ import androidx.compose.material.icons.outlined.VisibilityOff
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.HorizontalDivider
+import androidx.compose.material3.IconButton
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Surface
+import androidx.compose.material3.Slider
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.draw.rotate
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.drawscope.Stroke
@@ -75,6 +83,8 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.coroutineScope
+import kotlinx.coroutines.launch
 
 private val Ink = Color(0xFF171916)
 private val Panel = Color(0xFF20231E)
@@ -108,6 +118,9 @@ private fun SonoraApp() {
     var username by remember { mutableStateOf("") }
     var password by remember { mutableStateOf("") }
     var loginError by remember { mutableStateOf("") }
+    var selectedTrack by remember { mutableStateOf<MusicTrack?>(null) }
+    val context = LocalContext.current
+    var apiKey by remember { mutableStateOf(ApiKeyStore.read(context)) }
 
     LaunchedEffect(Unit) {
         delay(1500)
@@ -115,7 +128,7 @@ private fun SonoraApp() {
     }
 
     BackHandler(enabled = route != AppRoute.HOME && route != AppRoute.LOGIN && route != AppRoute.SPLASH) {
-        route = AppRoute.HOME
+        route = if (route == AppRoute.PLAYER) AppRoute.SEARCH else AppRoute.HOME
     }
 
     MaterialTheme {
@@ -160,7 +173,25 @@ private fun SonoraApp() {
                             route = AppRoute.LOGIN
                         }
                     )
-                    AppRoute.SEARCH, AppRoute.PLAYER, AppRoute.LIBRARY, AppRoute.PLAYLISTS ->
+                    AppRoute.SEARCH -> SearchScreen(
+                        apiKey = apiKey,
+                        onSaveApiKey = { newKey ->
+                            ApiKeyStore.save(context, newKey)
+                            apiKey = newKey
+                        },
+                        onSelectTrack = { track ->
+                            selectedTrack = track
+                            route = AppRoute.PLAYER
+                        },
+                        onNavigate = { route = it }
+                    )
+                    AppRoute.PLAYER -> PlayerScreen(
+                        track = selectedTrack,
+                        apiKey = apiKey,
+                        onBack = { route = AppRoute.SEARCH },
+                        onNavigate = { route = it }
+                    )
+                    AppRoute.LIBRARY, AppRoute.PLAYLISTS ->
                         ComingSoonScreen(
                             route = target,
                             onBack = { route = AppRoute.HOME },
@@ -406,6 +437,454 @@ private fun ToolRow(
         Text("SOON", fontSize = 9.sp, fontWeight = FontWeight.Bold, letterSpacing = .4.sp, color = Quiet)
     }
     HorizontalDivider(color = Line, thickness = .7.dp)
+}
+
+@Composable
+private fun SearchScreen(
+    apiKey: String,
+    onSaveApiKey: (String) -> Unit,
+    onSelectTrack: (MusicTrack) -> Unit,
+    onNavigate: (AppRoute) -> Unit
+) {
+    var query by remember { mutableStateOf("") }
+    var keyInput by remember { mutableStateOf("") }
+    var showKeySetup by remember { mutableStateOf(apiKey.isBlank()) }
+    var results by remember { mutableStateOf(emptyList<MusicTrack>()) }
+    var loading by remember { mutableStateOf(false) }
+    var hasSearched by remember { mutableStateOf(false) }
+    var error by remember { mutableStateOf("") }
+    val scope = rememberCoroutineScope()
+
+    fun search() {
+        if (query.isBlank() || loading) return
+        if (apiKey.isBlank()) {
+            showKeySetup = true
+            error = "Tambahkan API key untuk mulai mencari lagu."
+            return
+        }
+        loading = true
+        hasSearched = true
+        error = ""
+        results = emptyList()
+        scope.launch {
+            try {
+                results = MusicApi.searchTracks(query.trim(), apiKey)
+            } catch (exception: Exception) {
+                error = exception.message ?: "Pencarian gagal. Periksa koneksi lalu coba lagi."
+            } finally {
+                loading = false
+            }
+        }
+    }
+
+    androidx.compose.material3.Scaffold(
+        containerColor = Ink,
+        contentWindowInsets = WindowInsets(0),
+        bottomBar = { BottomNav(selected = AppRoute.SEARCH, onNavigate = onNavigate) }
+    ) { padding ->
+        Column(
+            modifier = Modifier.fillMaxSize().padding(padding).verticalScroll(rememberScrollState())
+                .padding(horizontal = 20.dp).padding(top = 22.dp, bottom = 28.dp)
+        ) {
+            Eyebrow("SONORA / DISCOVER")
+            Spacer(Modifier.height(7.dp))
+            Text("Cari lagu", fontSize = 29.sp, fontWeight = FontWeight.ExtraBold, letterSpacing = (-1.1).sp)
+            Spacer(Modifier.height(5.dp))
+            Text("Temukan track, lalu buka liriknya.", fontSize = 13.sp, color = Muted)
+            Spacer(Modifier.height(20.dp))
+
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                SearchInput(
+                    value = query,
+                    onValueChange = { query = it },
+                    hint = "Judul lagu atau nama artis",
+                    modifier = Modifier.weight(1f),
+                    leading = { Icon(Icons.Outlined.Search, contentDescription = null, tint = Muted, modifier = Modifier.size(19.dp)) }
+                )
+                Spacer(Modifier.width(9.dp))
+                Button(
+                    onClick = { search() },
+                    enabled = query.isNotBlank() && !loading,
+                    shape = RoundedCornerShape(11.dp),
+                    colors = ButtonDefaults.buttonColors(containerColor = Lime, contentColor = Ink),
+                    modifier = Modifier.height(50.dp)
+                ) { Text("Cari", fontWeight = FontWeight.Bold) }
+            }
+
+            Spacer(Modifier.height(13.dp))
+            if (apiKey.isNotBlank()) {
+                TextButton(onClick = { showKeySetup = !showKeySetup }) {
+                    Text(if (showKeySetup) "Tutup pengaturan key" else "Atur API key", color = Muted, fontSize = 12.sp)
+                }
+            }
+            if (showKeySetup) {
+                Surface(color = Panel, shape = RoundedCornerShape(14.dp), border = BorderStroke(1.dp, Line)) {
+                    Column(Modifier.fillMaxWidth().padding(15.dp)) {
+                        Text("API key Sylvatica", fontWeight = FontWeight.Bold, fontSize = 15.sp)
+                        Spacer(Modifier.height(5.dp))
+                        Text("Key disimpan terenkripsi di perangkat ini.", color = Muted, fontSize = 12.sp)
+                        Spacer(Modifier.height(11.dp))
+                        SearchInput(
+                            value = keyInput,
+                            onValueChange = { keyInput = it },
+                            hint = "Tempel API key di sini",
+                            obscured = true
+                        )
+                        Spacer(Modifier.height(10.dp))
+                        Button(
+                            onClick = {
+                                if (keyInput.isNotBlank()) {
+                                    onSaveApiKey(keyInput.trim())
+                                    keyInput = ""
+                                    showKeySetup = false
+                                    error = ""
+                                }
+                            },
+                            enabled = keyInput.isNotBlank(),
+                            modifier = Modifier.height(48.dp),
+                            shape = RoundedCornerShape(10.dp),
+                            colors = ButtonDefaults.buttonColors(containerColor = Lime, contentColor = Ink)
+                        ) { Text("Simpan key", fontWeight = FontWeight.Bold) }
+                    }
+                }
+                Spacer(Modifier.height(14.dp))
+            }
+
+            if (error.isNotBlank()) {
+                FeedbackNotice(text = error, isError = true)
+                Spacer(Modifier.height(13.dp))
+            }
+            if (loading) {
+                Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.padding(vertical = 18.dp)) {
+                    androidx.compose.material3.CircularProgressIndicator(color = Lime, strokeWidth = 2.dp, modifier = Modifier.size(21.dp))
+                    Spacer(Modifier.width(12.dp))
+                    Text("Mencari lagu…", fontSize = 13.sp, color = Muted)
+                }
+            } else if (hasSearched && error.isBlank() && results.isEmpty()) {
+                FeedbackNotice(text = "Belum ada hasil. Coba judul atau nama artis lain.", isError = false)
+            } else if (results.isNotEmpty()) {
+                Spacer(Modifier.height(7.dp))
+                Text("HASIL PENCARIAN  ·  ${results.size}", fontSize = 10.sp, fontWeight = FontWeight.Bold, letterSpacing = .9.sp, color = Muted)
+                Spacer(Modifier.height(6.dp))
+                results.forEachIndexed { index, track ->
+                    SearchResultRow(index = index + 1, track = track, onClick = { onSelectTrack(track) })
+                    HorizontalDivider(color = Line, thickness = .7.dp)
+                }
+            } else if (!hasSearched && error.isBlank()) {
+                Spacer(Modifier.height(14.dp))
+                Text("Cari judul lagu atau artis untuk melihat hasil dan liriknya.", fontSize = 13.sp, color = Quiet, lineHeight = 19.sp)
+            }
+        }
+    }
+}
+
+@Composable
+private fun SearchInput(
+    value: String,
+    onValueChange: (String) -> Unit,
+    hint: String,
+    modifier: Modifier = Modifier,
+    obscured: Boolean = false,
+    leading: (@Composable () -> Unit)? = null
+) {
+    Surface(
+        modifier = modifier.height(50.dp),
+        color = Panel,
+        shape = RoundedCornerShape(11.dp),
+        border = BorderStroke(1.dp, Line)
+    ) {
+        Row(
+            modifier = Modifier.fillMaxSize().padding(horizontal = 13.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            leading?.invoke()
+            if (leading != null) Spacer(Modifier.width(9.dp))
+            Box(Modifier.weight(1f)) {
+                if (value.isEmpty()) Text(hint, fontSize = 13.sp, color = Quiet, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                BasicTextField(
+                    value = value,
+                    onValueChange = onValueChange,
+                    singleLine = true,
+                    textStyle = TextStyle(fontSize = 13.sp, color = Cream),
+                    visualTransformation = if (obscured) androidx.compose.ui.text.input.PasswordVisualTransformation() else androidx.compose.ui.text.input.VisualTransformation.None,
+                    modifier = Modifier.fillMaxWidth()
+                )
+            }
+        }
+    }
+}
+
+@Composable
+private fun SearchResultRow(index: Int, track: MusicTrack, onClick: () -> Unit) {
+    Row(
+        modifier = Modifier.fillMaxWidth().clickable(onClick = onClick).padding(vertical = 12.dp),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        Text(index.toString().padStart(2, '0'), fontSize = 10.sp, color = Quiet, modifier = Modifier.width(27.dp))
+        Box(Modifier.size(43.dp).background(PanelRaised, RoundedCornerShape(8.dp)), contentAlignment = Alignment.Center) {
+            Icon(Icons.Outlined.MusicNote, contentDescription = null, tint = Lime, modifier = Modifier.size(20.dp))
+        }
+        Spacer(Modifier.width(11.dp))
+        Column(Modifier.weight(1f)) {
+            Text(track.name, fontSize = 14.sp, fontWeight = FontWeight.Bold, maxLines = 1, overflow = TextOverflow.Ellipsis)
+            Spacer(Modifier.height(3.dp))
+            Text("${track.artist}  ·  ${track.album}", fontSize = 11.sp, color = Muted, maxLines = 1, overflow = TextOverflow.Ellipsis)
+        }
+        Spacer(Modifier.width(8.dp))
+        Text(track.duration, fontSize = 11.sp, color = Quiet)
+        IconButton(onClick = onClick) {
+            Icon(Icons.Outlined.PlayArrow, contentDescription = "Lihat lagu dan lirik", tint = Lime)
+        }
+    }
+}
+
+@Composable
+private fun FeedbackNotice(text: String, isError: Boolean) {
+    Surface(color = Panel, shape = RoundedCornerShape(12.dp), border = BorderStroke(1.dp, if (isError) ErrorRed.copy(alpha = .6f) else Line)) {
+        Text(
+            text = text,
+            modifier = Modifier.fillMaxWidth().padding(14.dp),
+            fontSize = 13.sp,
+            color = if (isError) ErrorRed else Muted,
+            lineHeight = 19.sp
+        )
+    }
+}
+
+@Composable
+private fun PlayerScreen(
+    track: MusicTrack?,
+    apiKey: String,
+    onBack: () -> Unit,
+    onNavigate: (AppRoute) -> Unit
+) {
+    var lyrics by remember(track?.spotifyUrl) { mutableStateOf<TrackLyrics?>(null) }
+    var media by remember(track?.spotifyUrl) { mutableStateOf<PlayableMedia?>(null) }
+    var lyricsLoading by remember(track?.spotifyUrl) { mutableStateOf(track != null) }
+    var mediaLoading by remember(track?.spotifyUrl) { mutableStateOf(track != null) }
+    var lyricsError by remember(track?.spotifyUrl) { mutableStateOf("") }
+    var mediaError by remember(track?.spotifyUrl) { mutableStateOf("") }
+    var retryCount by remember(track?.spotifyUrl) { mutableStateOf(0) }
+    var mediaPlayer by remember(track?.spotifyUrl) { mutableStateOf<MediaPlayer?>(null) }
+    var isPlaying by remember(track?.spotifyUrl) { mutableStateOf(false) }
+    var isBuffering by remember(track?.spotifyUrl) { mutableStateOf(false) }
+    var playbackError by remember(track?.spotifyUrl) { mutableStateOf("") }
+    var playbackPosition by remember(track?.spotifyUrl) { mutableStateOf(0) }
+    var playbackDuration by remember(track?.spotifyUrl) { mutableStateOf(0) }
+
+    LaunchedEffect(track?.spotifyUrl, apiKey, retryCount) {
+        val selected = track ?: return@LaunchedEffect
+        lyrics = null
+        media = null
+        lyricsError = ""
+        mediaError = ""
+        playbackError = ""
+        if (apiKey.isBlank()) {
+            lyricsLoading = false
+            mediaLoading = false
+            lyricsError = "Tambahkan API key dari halaman Search untuk memuat lirik."
+            mediaError = "Tambahkan API key dari halaman Search untuk memutar lagu."
+            return@LaunchedEffect
+        }
+        lyricsLoading = true
+        mediaLoading = true
+        coroutineScope {
+            launch {
+                runCatching { MusicApi.findLyrics(selected, apiKey) }
+                    .onSuccess { lyrics = it }
+                    .onFailure { lyricsError = it.message ?: "Lirik gagal dimuat. Periksa koneksi lalu coba lagi." }
+                lyricsLoading = false
+            }
+            launch {
+                runCatching { MusicApi.getPlayableMedia(selected, apiKey) }
+                    .onSuccess { media = it }
+                    .onFailure { mediaError = it.message ?: "Audio gagal dimuat. Periksa koneksi lalu coba lagi." }
+                mediaLoading = false
+            }
+        }
+    }
+
+    DisposableEffect(media?.url) {
+        val audioUrl = media?.url
+        if (audioUrl.isNullOrBlank()) return@DisposableEffect onDispose { }
+        val player = MediaPlayer()
+        mediaPlayer = player
+        isBuffering = true
+        playbackError = ""
+        player.setAudioAttributes(
+            AudioAttributes.Builder()
+                .setUsage(AudioAttributes.USAGE_MEDIA)
+                .setContentType(AudioAttributes.CONTENT_TYPE_MUSIC)
+                .build()
+        )
+        player.setOnPreparedListener {
+            playbackDuration = it.duration.coerceAtLeast(0)
+            isBuffering = false
+            runCatching { it.start(); isPlaying = true }
+                .onFailure { playbackError = "Audio tidak dapat diputar di perangkat ini." }
+        }
+        player.setOnCompletionListener {
+            isPlaying = false
+            playbackPosition = 0
+            runCatching { it.seekTo(0) }
+        }
+        player.setOnErrorListener { _, _, _ ->
+            isBuffering = false
+            isPlaying = false
+            playbackError = "Pemutaran audio terputus. Coba muat ulang lagu."
+            true
+        }
+        runCatching {
+            player.setDataSource(audioUrl)
+            player.prepareAsync()
+        }.onFailure {
+            isBuffering = false
+            playbackError = "Tautan audio tidak dapat dibuka. Coba muat ulang lagu."
+        }
+        onDispose {
+            if (mediaPlayer === player) mediaPlayer = null
+            runCatching { player.release() }
+            isPlaying = false
+            isBuffering = false
+        }
+    }
+
+    LaunchedEffect(mediaPlayer) {
+        while (mediaPlayer != null) {
+            val player = mediaPlayer
+            if (player != null && runCatching { player.isPlaying }.getOrDefault(false)) {
+                playbackPosition = runCatching { player.currentPosition }.getOrDefault(playbackPosition)
+            }
+            delay(500)
+        }
+    }
+
+    androidx.compose.material3.Scaffold(
+        containerColor = Ink,
+        contentWindowInsets = WindowInsets(0),
+        bottomBar = { BottomNav(selected = AppRoute.PLAYER, onNavigate = onNavigate) }
+    ) { padding ->
+        Column(
+            modifier = Modifier.fillMaxSize().padding(padding).verticalScroll(rememberScrollState())
+                .padding(horizontal = 20.dp).padding(top = 16.dp, bottom = 28.dp)
+        ) {
+            TextButton(onClick = onBack) { Text("‹  Kembali ke pencarian", color = Muted, fontWeight = FontWeight.SemiBold) }
+            if (track == null) {
+                Spacer(Modifier.height(46.dp))
+                RecordMark(Modifier.size(100.dp), 100.dp)
+                Spacer(Modifier.height(22.dp))
+                Text("Pilih lagu dulu", fontSize = 25.sp, fontWeight = FontWeight.ExtraBold)
+                Spacer(Modifier.height(7.dp))
+                Text("Cari lagu untuk memutar audio dan melihat liriknya.", fontSize = 13.sp, color = Muted)
+                Spacer(Modifier.height(17.dp))
+                Button(onClick = { onNavigate(AppRoute.SEARCH) }, modifier = Modifier.height(48.dp), colors = ButtonDefaults.buttonColors(containerColor = Lime, contentColor = Ink)) {
+                    Text("Buka Search", fontWeight = FontWeight.Bold)
+                }
+            } else {
+                Spacer(Modifier.height(10.dp))
+                Eyebrow("NOW PLAYING / SONORA")
+                Spacer(Modifier.height(13.dp))
+                Surface(color = Panel, shape = RoundedCornerShape(16.dp), border = BorderStroke(1.dp, Line)) {
+                    Row(Modifier.fillMaxWidth().padding(16.dp), verticalAlignment = Alignment.CenterVertically) {
+                        RecordMark(Modifier.size(72.dp), 72.dp)
+                        Spacer(Modifier.width(15.dp))
+                        Column(Modifier.weight(1f)) {
+                            Text(track.name, fontSize = 19.sp, fontWeight = FontWeight.ExtraBold, lineHeight = 23.sp)
+                            Spacer(Modifier.height(4.dp))
+                            Text(track.artist, fontSize = 13.sp, color = Muted)
+                            Spacer(Modifier.height(3.dp))
+                            Text("${track.album}  ·  ${media?.duration ?: track.duration}", fontSize = 11.sp, color = Quiet, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                        }
+                    }
+                }
+                Spacer(Modifier.height(10.dp))
+                when {
+                    mediaLoading || isBuffering -> Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.padding(vertical = 14.dp)) {
+                        androidx.compose.material3.CircularProgressIndicator(color = Lime, strokeWidth = 2.dp, modifier = Modifier.size(20.dp))
+                        Spacer(Modifier.width(10.dp))
+                        Text(if (mediaLoading) "Mencari audio…" else "Memuat pemutar…", fontSize = 13.sp, color = Muted)
+                    }
+                    mediaError.isNotBlank() || playbackError.isNotBlank() -> {
+                        FeedbackNotice(playbackError.ifBlank { mediaError }, isError = true)
+                        Spacer(Modifier.height(8.dp))
+                        Button(onClick = { retryCount++ }, modifier = Modifier.height(44.dp), colors = ButtonDefaults.buttonColors(containerColor = PanelRaised, contentColor = Cream)) {
+                            Text("Coba lagi", fontWeight = FontWeight.SemiBold)
+                        }
+                    }
+                    mediaPlayer != null -> {
+                        Slider(
+                            value = playbackPosition.toFloat().coerceIn(0f, playbackDuration.coerceAtLeast(1).toFloat()),
+                            onValueChange = { position ->
+                                playbackPosition = position.toInt()
+                                runCatching { mediaPlayer?.seekTo(position.toInt()) }
+                            },
+                            valueRange = 0f..playbackDuration.coerceAtLeast(1).toFloat()
+                        )
+                        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                            Text(formatPlaybackTime(playbackPosition), fontSize = 11.sp, color = Quiet)
+                            Text(formatPlaybackTime(playbackDuration), fontSize = 11.sp, color = Quiet)
+                        }
+                        Spacer(Modifier.height(5.dp))
+                        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.Center) {
+                            IconButton(
+                                onClick = {
+                                    runCatching {
+                                        if (isPlaying) mediaPlayer?.pause() else mediaPlayer?.start()
+                                        isPlaying = mediaPlayer?.isPlaying == true
+                                    }.onFailure { playbackError = "Pemutaran audio gagal." }
+                                },
+                                enabled = !isBuffering,
+                                modifier = Modifier.size(58.dp).background(Lime, CircleShape)
+                            ) {
+                                Icon(
+                                    if (isPlaying) Icons.Outlined.Pause else Icons.Outlined.PlayArrow,
+                                    contentDescription = if (isPlaying) "Jeda" else "Putar",
+                                    tint = Ink,
+                                    modifier = Modifier.size(31.dp)
+                                )
+                            }
+                        }
+                    }
+                }
+                Spacer(Modifier.height(25.dp))
+                Row(verticalAlignment = Alignment.Bottom, horizontalArrangement = Arrangement.SpaceBetween, modifier = Modifier.fillMaxWidth()) {
+                    Column {
+                        Eyebrow("WORDS / LYRICS")
+                        Spacer(Modifier.height(5.dp))
+                        Text("Lirik lagu", fontSize = 22.sp, fontWeight = FontWeight.Bold)
+                    }
+                    Text(if (lyrics?.syncedLyrics?.isNotBlank() == true) "TIMED LYRICS" else "", fontSize = 9.sp, color = Quiet, fontWeight = FontWeight.Bold)
+                }
+                Spacer(Modifier.height(12.dp))
+                when {
+                    lyricsLoading -> Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.padding(vertical = 16.dp)) {
+                        androidx.compose.material3.CircularProgressIndicator(color = Lime, strokeWidth = 2.dp, modifier = Modifier.size(21.dp))
+                        Spacer(Modifier.width(12.dp))
+                        Text("Memuat lirik…", fontSize = 13.sp, color = Muted)
+                    }
+                    lyricsError.isNotBlank() -> FeedbackNotice(lyricsError, isError = true)
+                    lyrics == null -> FeedbackNotice("Lirik tidak ditemukan. Coba lagu lain dari Search.", isError = false)
+                    else -> {
+                        val lyricsText = lyrics!!.plainLyrics.ifBlank {
+                            lyrics!!.syncedLyrics.replace(Regex("\\[\\d{2}:\\d{2}(?:\\.\\d{1,3})?\\]\\s*"), "")
+                        }
+                        if (lyrics!!.instrumental && lyricsText.isBlank()) {
+                            FeedbackNotice("Track ini instrumental dan tidak memiliki lirik.", isError = false)
+                        } else if (lyricsText.isBlank()) {
+                            FeedbackNotice("Lirik belum tersedia untuk lagu ini.", isError = false)
+                        } else {
+                            Text(lyricsText, fontSize = 16.sp, fontWeight = FontWeight.SemiBold, lineHeight = 27.sp, color = Cream)
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+private fun formatPlaybackTime(milliseconds: Int): String {
+    val totalSeconds = (milliseconds.coerceAtLeast(0) / 1000)
+    return "%d:%02d".format(totalSeconds / 60, totalSeconds % 60)
 }
 
 @Composable
