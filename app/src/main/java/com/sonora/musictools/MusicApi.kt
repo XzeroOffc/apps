@@ -6,6 +6,7 @@ import kotlinx.coroutines.withContext
 import org.json.JSONObject
 import java.io.IOException
 import java.net.HttpURLConnection
+import java.net.SocketTimeoutException
 import java.net.URL
 
 data class MusicTrack(
@@ -93,7 +94,7 @@ object MusicApi {
 
     suspend fun getPlayableMedia(track: MusicTrack, apiKey: String): PlayableMedia = withContext(Dispatchers.IO) {
         val query = listOf(track.artist, track.title).filter { it.isNotBlank() }.joinToString(" ")
-        val response = getJson("$BASE_URL/play?q=${Uri.encode(query)}", apiKey)
+        val response = getJson("$BASE_URL/play?q=${Uri.encode(query)}", apiKey, readTimeoutMs = 120_000)
         val media = response.optJSONObject("media")
             ?: throw IOException("Layanan tidak mengembalikan data audio.")
         val audioUrl = media.optString("url").trim()
@@ -109,11 +110,11 @@ object MusicApi {
         )
     }
 
-    private fun getJson(url: String, apiKey: String): JSONObject {
+    private fun getJson(url: String, apiKey: String, readTimeoutMs: Int = 18_000): JSONObject {
         val connection = (URL(url).openConnection() as HttpURLConnection).apply {
             requestMethod = "GET"
             connectTimeout = 12_000
-            readTimeout = 18_000
+            readTimeout = readTimeoutMs
             setRequestProperty("Accept", "application/json")
             setRequestProperty("X-API-Key", apiKey)
         }
@@ -128,6 +129,13 @@ object MusicApi {
                 throw IOException(json.optString("message").ifBlank { "Permintaan ke layanan musik gagal ($status)." })
             }
             return json
+        } catch (exception: SocketTimeoutException) {
+            val message = if (url.contains("/play?")) {
+                "Layanan audio masih memproses permintaan. Tunggu sebentar, lalu coba lagi."
+            } else {
+                "Permintaan melewati batas waktu. Periksa koneksi lalu coba lagi."
+            }
+            throw IOException(message, exception)
         } finally {
             connection.disconnect()
         }
