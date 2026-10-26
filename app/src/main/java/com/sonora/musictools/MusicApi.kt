@@ -1,9 +1,12 @@
 package com.sonora.musictools
 
+import android.content.Context
 import android.net.Uri
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import org.json.JSONObject
+import java.io.BufferedOutputStream
+import java.io.File
 import java.io.IOException
 import java.net.HttpURLConnection
 import java.net.SocketTimeoutException
@@ -108,6 +111,56 @@ object MusicApi {
             duration = videoInfo?.optString("duration").orEmpty().ifBlank { track.duration },
             thumbnail = videoInfo?.optString("thumbnail").orEmpty().ifBlank { track.thumbnail }
         )
+    }
+
+    suspend fun cacheAudio(context: Context, media: PlayableMedia, cacheKey: String): PlayableMedia = withContext(Dispatchers.IO) {
+        val safeKey = cacheKey.replace(Regex("[^A-Za-z0-9_-]"), "_").ifBlank { "track" }
+        val audioFile = File(context.cacheDir, "sonora_$safeKey.mp3")
+        if (audioFile.isFile && audioFile.length() > 4096L) {
+            return@withContext media.copy(url = Uri.fromFile(audioFile).toString())
+        }
+
+        val temporaryFile = File(context.cacheDir, "sonora_$safeKey.download")
+        val connection = (URL(media.url).openConnection() as HttpURLConnection).apply {
+            requestMethod = "GET"
+            connectTimeout = 20_000
+            readTimeout = 120_000
+            instanceFollowRedirects = true
+            setRequestProperty("User-Agent", "Mozilla/5.0 (Linux; Android) SONORA Music Tools")
+            setRequestProperty("Accept", "audio/mpeg, audio/*;q=0.9, */*;q=0.8")
+        }
+        try {
+            val status = connection.responseCode
+            if (status !in 200..299) {
+                throw IOException("Server audio gagal mengirim file ($status). Coba lagi.")
+            }
+            val contentType = connection.contentType.orEmpty().lowercase()
+            if (contentType.contains("text/html") || contentType.contains("application/json")) {
+                throw IOException("Server mengirim halaman, bukan file audio. Coba lagi beberapa saat.")
+            }
+            connection.inputStream.buffered().use { input ->
+                BufferedOutputStream(temporaryFile.outputStream()).use { output ->
+                    input.copyTo(output)
+                }
+            }
+            if (temporaryFile.length() < 4096L) {
+                throw IOException("File audio yang diterima tidak lengkap. Tekan Coba lagi.")
+            }
+            if (audioFile.exists()) audioFile.delete()
+            if (!temporaryFile.renameTo(audioFile)) {
+                temporaryFile.copyTo(audioFile, overwrite = true)
+                temporaryFile.delete()
+            }
+            media.copy(url = Uri.fromFile(audioFile).toString())
+        } catch (exception: SocketTimeoutException) {
+            temporaryFile.delete()
+            throw IOException("Unduhan audio terlalu lama. Periksa koneksi lalu coba lagi.", exception)
+        } catch (exception: Exception) {
+            temporaryFile.delete()
+            throw exception
+        } finally {
+            connection.disconnect()
+        }
     }
 
     private fun getJson(url: String, apiKey: String, readTimeoutMs: Int = 18_000): JSONObject {

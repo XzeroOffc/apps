@@ -702,7 +702,10 @@ private fun PlayerScreen(
                 lyricsLoading = false
             }
             launch {
-                runCatching { MusicApi.getPlayableMedia(selected, apiKey) }
+                runCatching {
+                    val remoteMedia = MusicApi.getPlayableMedia(selected, apiKey)
+                    MusicApi.cacheAudio(context, remoteMedia, selected.videoId)
+                }
                     .onSuccess { media = it }
                     .onFailure { mediaError = it.message ?: "Audio gagal dimuat. Periksa koneksi lalu coba lagi." }
                 mediaLoading = false
@@ -818,7 +821,7 @@ private fun PlayerScreen(
                     mediaLoading || isBuffering -> Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.padding(vertical = 14.dp)) {
                         androidx.compose.material3.CircularProgressIndicator(color = Lime, strokeWidth = 2.dp, modifier = Modifier.size(20.dp))
                         Spacer(Modifier.width(10.dp))
-                        Text(if (mediaLoading) "Mencari audio…" else "Memuat pemutar…", fontSize = 13.sp, color = Muted)
+                        Text(if (mediaLoading) "Menyiapkan audio…" else "Memuat pemutar…", fontSize = 13.sp, color = Muted)
                     }
                     mediaError.isNotBlank() || playbackError.isNotBlank() -> {
                         FeedbackNotice(playbackError.ifBlank { mediaError }, isError = true)
